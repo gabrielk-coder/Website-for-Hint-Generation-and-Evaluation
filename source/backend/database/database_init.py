@@ -99,13 +99,12 @@ def init_db() -> None:
             );
         """)
 
-        # 🔁 MIGRATION: add is_groundtruth if missing
         cur.execute("""
             ALTER TABLE candidate_answers
             ADD COLUMN IF NOT EXISTS is_groundtruth BOOLEAN NOT NULL DEFAULT FALSE;
         """)
 
-        # 🔒 Optional: ensure only ONE ground truth per question
+    
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS unique_groundtruth_per_question
             ON candidate_answers (question_id)

@@ -161,7 +161,6 @@ export const api = {
     });
   },
   
-  // NEW: Swap Ground Truth
   setCandidateAsGroundTruth: async (index: number) => {
     return fetch(`${API_BASE}/hinteval/set_ground_truth`, {
       method: "POST", headers, credentials: creds, body: JSON.stringify({ candidate_index: index })
@@ -205,7 +204,6 @@ export const api = {
      return res.json();
   },
   
-  // Load the preset configuration
   loadPreset: async (payload: { data: any }) => {
     const res = await fetch(`${API_BASE}/hinteval/load_preset`, {
       method: "POST",

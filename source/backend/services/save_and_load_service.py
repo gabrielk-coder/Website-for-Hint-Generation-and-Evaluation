@@ -11,7 +11,6 @@ from psycopg2.extras import Json
 
 logger = logging.getLogger(__name__)
 
-# Fallback for generation service if dependency is missing
 try:
     from .generation_service import generate_only_answer
 except ImportError:
@@ -42,7 +41,6 @@ def clear_session_data(conn, session_id: str) -> Dict[str, Any]:
     """
     cur = conn.cursor()
     try:
-        # Check existence first for reporting
         cur.execute("SELECT COUNT(*) FROM questions WHERE session_id = %s", (session_id,))
         q_count = cur.fetchone()[0]
         
@@ -53,7 +51,6 @@ def clear_session_data(conn, session_id: str) -> Dict[str, Any]:
                 "counts": {"questions": 0, "answers": 0, "hints": 0, "candidates": 0}
             }
         
-        # Gather stats before deletion
         stats = {}
         for table in ['answers', 'hints', 'candidate_answers']:
             cur.execute(f"SELECT COUNT(*) FROM {table} WHERE question_id IN (SELECT id FROM questions WHERE session_id = %s)", (session_id,))
@@ -62,7 +59,6 @@ def clear_session_data(conn, session_id: str) -> Dict[str, Any]:
 
         logger.info(f"Clearing session {session_id}: {stats}")
         
-        # Execute Cascade Delete
         cur.execute("DELETE FROM questions WHERE session_id = %s", (session_id,))
         conn.commit()
         
@@ -119,7 +115,7 @@ def export_session_json(conn, session_id: str, full_export: bool = True) -> Dict
         if full_export and model_name:
             instance_data["model_name"] = model_name
 
-        # Enrich Hints
+        # Hints
         for db_hint_id, hint_text in hint_rows:
             hint_obj = {"hint": hint_text, "db_id": db_hint_id}
             
@@ -130,6 +126,7 @@ def export_session_json(conn, session_id: str, full_export: bool = True) -> Dict
                 for name, val, meta in cur.fetchall():
                     m = {"name": name, "value": val}
                     if meta: m["metadata"] = json.loads(meta)
+                    else: m["metadata"] = {}
                     metrics.append(m)
                 if metrics: hint_obj["metrics"] = metrics
 
@@ -146,11 +143,12 @@ def export_session_json(conn, session_id: str, full_export: bool = True) -> Dict
 
         # Fetch Candidates
         if full_export:
-            cur.execute("SELECT candidate_text, is_eliminated, created_at, updated_at FROM candidate_answers WHERE question_id = %s ORDER BY id", (qid,))
+            cur.execute("SELECT candidate_text, is_eliminated, created_at, updated_at, is_groundtruth FROM candidate_answers WHERE question_id = %s ORDER BY id", (qid,))
             cands = []
-            for txt, elim, cr, up in cur.fetchall():
+            for txt, elim, cr, up, is_gt in cur.fetchall():
                 c = {"text": txt, "is_eliminated": bool(elim), "created_at": cr}
                 if up: c["updated_at"] = up
+                if is_gt is not None: c["is_groundtruth"] = bool(is_gt)
                 cands.append(c)
             
             if cands:
@@ -182,7 +180,7 @@ def export_session_csv_stream(conn, session_id: str):
             for h in inst.get("hints", []):
                 if h.get("hint"): writer.writerow(["hint", h["hint"]])
     except Exception:
-        pass # Return empty/header-only csv on error
+        pass
 
     output.seek(0)
     return output
@@ -198,11 +196,9 @@ def import_session_data(conn, session_id: str, data: Any, format_type: str = "js
         parsed = _parse_csv_to_structure(data)
         return _insert_simple_structure(conn, session_id, parsed)
     
-    # Check JSON Structure
     if _is_full_backup_format(data):
         return _insert_full_backup(conn, session_id, data)
     
-    # Default to simple JSON import
     return _insert_simple_structure(conn, session_id, data)
 
 
@@ -301,7 +297,7 @@ def _insert_full_backup(conn, session_id: str, data: Dict[str, Any]) -> Dict[str
         q_ids = []
 
         for inst_id, content in instances.items():
-            # 1. QA
+            # QA
             q_raw = content.get("question", {})
             q_text = q_raw.get("question", "") if isinstance(q_raw, dict) else str(q_raw)
             
@@ -314,7 +310,7 @@ def _insert_full_backup(conn, session_id: str, data: Dict[str, Any]) -> Dict[str
             q_ids.append(qid)
             counts["q"] += 1
 
-            # 2. Hints
+            # Hints
             for h in content.get("hints", []):
                 h_text = h.get("hint", "")
                 if not h_text: continue
@@ -344,11 +340,11 @@ def _insert_full_backup(conn, session_id: str, data: Dict[str, Any]) -> Dict[str
                     )
                     counts["e"] += 1
 
-            # 3. Candidates
+            # Candidates
             for c in content.get("candidates_full", []):
                 cur.execute(
-                    "INSERT INTO candidate_answers (question_id, candidate_text, is_eliminated, created_at, updated_at) VALUES (%s, %s, %s, %s, %s)",
-                    (qid, c["text"], 1 if c["is_eliminated"] else 0, c.get("created_at", _now()), c.get("updated_at"))
+                    "INSERT INTO candidate_answers (question_id, candidate_text, is_eliminated, created_at, updated_at, is_groundtruth) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (qid, c["text"], 1 if c["is_eliminated"] else 0, c.get("created_at", _now()), c.get("updated_at"), c.get("is_groundtruth", False))
                 )
                 counts["c"] += 1
 
@@ -380,7 +376,6 @@ def _insert_qa_core(cur, conn, session_id: str, q_text: str, a_text: str) -> Tup
     )
     qid = cur.fetchone()[0]
 
-    # Handle Answer
     if a_text:
         cur.execute(
             "INSERT INTO answers (question_id, answer_text, created_at) VALUES (%s, %s, %s) RETURNING id",
@@ -389,7 +384,7 @@ def _insert_qa_core(cur, conn, session_id: str, q_text: str, a_text: str) -> Tup
         aid = cur.fetchone()[0]
     else:
         logger.info(f"Answer missing for QID {qid}, generating...")
-        conn.commit() # Commit question so generator can read it
+        conn.commit()
         
         gen_ans = generate_only_answer(conn, q_text, "meta-llama/Llama-3.3-70B-Instruct-Turbo", question_id=qid)
         

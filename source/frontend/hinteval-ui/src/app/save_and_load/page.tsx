@@ -15,26 +15,28 @@ import {
   Check,
   Server,
   TableProperties,
-  Trash2,
   AlertTriangle,
+  Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+// --- Configuration ---
 const API = process.env.NEXT_PUBLIC_HINTEVAL_API ?? "http://localhost:8000";
 
-// --- Types ---
+// --- Types matched to Python Backend Returns ---
 interface ImportResult {
   status: string;
   session_id: string;
   import: {
     info: string;
+    question_id?: number;
+    question_ids?: number[];
     counts?: {
-      questions: number;
-      answers?: number;
-      hints: number;
-      metrics?: number;
-      entities?: number;
-      candidates?: number;
+      q?: number;
+      h?: number;
+      m?: number;
+      e?: number;
+      c?: number;
     };
   };
   cleared?: {
@@ -44,13 +46,12 @@ interface ImportResult {
       questions: number;
       answers: number;
       hints: number;
-      candidates: number;
+      candidate_answers?: number;
     };
   };
 }
 
 // --- Sub-Components ---
-
 const Badge = ({
   children,
   color = "slate",
@@ -59,12 +60,12 @@ const Badge = ({
   color?: "slate" | "indigo" | "purple" | "emerald" | "cyan" | "red";
 }) => {
   const styles = {
-    slate: "bg-slate-800 text-slate-400 border-slate-700",
-    indigo: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
-    purple: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-    emerald: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    cyan: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-    red: "bg-red-500/10 text-red-400 border-red-500/20",
+    slate: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700",
+    indigo: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20",
+    purple: "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20",
+    emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
+    cyan: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/20",
+    red: "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20",
   };
   return (
     <span
@@ -90,8 +91,20 @@ const CodeWindow = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const downloadFile = () => {
+    const blob = new Blob([code], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="rounded-lg overflow-hidden border border-slate-800 bg-[#0d1117] shadow-inner flex flex-col h-full">
+    <div className="rounded-lg overflow-hidden border border-border bg-[#0d1117] shadow-inner flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
         <div className="flex items-center gap-3">
           <div className="flex gap-1.5">
@@ -102,18 +115,31 @@ const CodeWindow = ({
             {filename}
           </span>
         </div>
-        <button
-          onClick={copyToClipboard}
-          className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1"
-        >
-          {copied ? (
-            <Check className="w-3 h-3 text-emerald-400" />
-          ) : (
-            <Copy className="w-3 h-3" />
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Download Button */}
+          <button
+            onClick={downloadFile}
+            title="Download file"
+            className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1 px-2 py-1 hover:bg-slate-800 rounded group"
+          >
+            <Download className="w-3 h-3 group-hover:text-cyan-400" />
+          </button>
+          
+          {/* Copy Button */}
+          <button
+            onClick={copyToClipboard}
+            title="Copy to clipboard"
+            className="text-xs text-slate-500 hover:text-white transition-colors flex items-center gap-1 px-2 py-1 hover:bg-slate-800 rounded"
+          >
+            {copied ? (
+              <Check className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <Copy className="w-3 h-3" />
+            )}
+          </button>
+        </div>
       </div>
-      <div className="p-4 overflow-x-auto custom-scrollbar flex-1">
+      <div className="p-4 overflow-x-auto custom-scrollbar flex-1 max-h-[500px]">
         <pre className="text-xs font-mono leading-relaxed text-slate-300">
           <code>{code}</code>
         </pre>
@@ -129,7 +155,10 @@ export default function SaveLoadPage() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "success" | "error">("idle");
   const [statusMsg, setStatusMsg] = useState("");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  
+  // Tabs: 'full' (Nested JSON), 'simple' (Flat JSON), 'csv' (Spreadsheet)
   const [activeGuideTab, setActiveGuideTab] = useState<"full" | "simple" | "csv">("full");
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDownload = async (format: "json" | "csv" | "full_json") => {
@@ -158,7 +187,7 @@ export default function SaveLoadPage() {
         {
           method: "POST",
           body: formData,
-          credentials: "include",
+          credentials: "include", // Ensure session ID cookie is sent
         }
       );
 
@@ -171,11 +200,10 @@ export default function SaveLoadPage() {
       setUploadStatus("success");
       setImportResult(data);
       
-      // Construct detailed status message
       const importInfo = data.import.info;
-      const clearedInfo = data.cleared 
-        ? ` • Previous data cleared: ${data.cleared.counts.questions} questions, ${data.cleared.counts.hints} hints`
-        : " • Session was empty";
+      const clearedInfo = data.cleared?.cleared
+        ? ` • Cleared: ${data.cleared.counts.questions} items.`
+        : " • Clean import.";
       
       setStatusMsg(`${importInfo}${clearedInfo}`);
       
@@ -188,57 +216,29 @@ export default function SaveLoadPage() {
     }
   };
 
-  const handleClearSession = async () => {
-    if (!confirm("Are you sure you want to clear all session data? This cannot be undone.")) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API}/save_and_load/clear`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to clear session");
-      }
-
-      const data = await res.json();
-      alert(data.message || "Session cleared successfully");
-      window.location.reload();
-    } catch (err: any) {
-      alert(err.message || "Failed to clear session");
-    }
-  };
-
   return (
-    <div className="bg-slate-950 min-h-screen text-slate-200 font-sans pb-20 selection:bg-indigo-500/30">
+    <div className="bg-background min-h-screen text-foreground font-sans pb-20 selection:bg-primary/30">
       
       {/* Header */}
-      <div className="bg-slate-900/50 border-b border-white/5 py-12">
+      <div className="bg-muted/30 border-b border-border py-12">
         <div className="container mx-auto px-6 max-w-6xl">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="space-y-2 text-center md:text-left">
-              <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3 justify-center md:justify-start">
+          <div className="flex flex-col gap-6 w-full"> 
+            
+            <div className="space-y-4 text-center md:text-left w-full">
+              <h1 className="text-3xl font-black text-foreground tracking-tight flex items-center gap-3 justify-center md:justify-start">
                 <div className="p-2 bg-indigo-500/10 rounded-lg ring-1 ring-indigo-500/30">
-                  <Database className="w-6 h-6 text-indigo-400" />
+                  <Database className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                 </div>
-                Data Management
+                Data & Session Management
               </h1>
-              <p className="text-slate-400 text-sm max-w-md">
-                Manage your session lifecycle. Export for analysis or import
-                datasets to restore state.
+              
+              <p className="text-muted-foreground text-base leading-relaxed w-full">
+                Gain complete control over your workspace lifecycle. Seamlessly export your current 
+                session logs for deep external analysis, or import existing datasets to instantly 
+                restore previous system states and configurations without data loss.
               </p>
             </div>
-            
-            <Button
-              onClick={handleClearSession}
-              variant="outline"
-              className="border-red-500/20 text-red-400 hover:bg-red-500/10 hover:border-red-500/40"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Clear Session
-            </Button>
+        
           </div>
         </div>
       </div>
@@ -249,12 +249,12 @@ export default function SaveLoadPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full">
           
           {/* Export Card */}
-          <div className="flex flex-col h-full bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
-            <div className="p-6 border-b border-white/5 bg-gradient-to-r from-slate-900 to-slate-900/50">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Download className="w-5 h-5 text-indigo-400" /> Export Data
+          <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
+            <div className="p-6 border-b border-border bg-muted/50">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /> Export Data
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Download your current workspace state.
               </p>
             </div>
@@ -264,18 +264,18 @@ export default function SaveLoadPage() {
                 onClick={() => handleDownload("full_json")}
                 className="w-full flex items-start gap-4 p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20 hover:bg-indigo-500/10 hover:border-indigo-500/40 transition-all group text-left"
               >
-                <div className="p-3 bg-indigo-500/20 rounded-md text-indigo-400 group-hover:text-white group-hover:scale-110 transition-all">
+                <div className="p-3 bg-indigo-500/20 rounded-md text-indigo-600 dark:text-indigo-400 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 group-hover:scale-110 transition-all">
                   <Server className="w-6 h-6" />
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-slate-200 group-hover:text-white">
+                    <span className="font-bold text-foreground group-hover:text-indigo-700 dark:group-hover:text-indigo-300">
                       Full Session Backup
                     </span>
                     <Badge color="indigo">Recommended</Badge>
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Preserves <span className="text-indigo-300">everything</span>:
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Preserves <span className="text-indigo-600 dark:text-indigo-300 font-medium">everything</span>:
                     Question, Answer, Hints, Metrics, Entities & Candidates.
                   </p>
                 </div>
@@ -284,41 +284,41 @@ export default function SaveLoadPage() {
               <div className="grid grid-cols-2 gap-4 mt-auto">
                 <button
                   onClick={() => handleDownload("json")}
-                  className="flex flex-col items-start p-4 rounded-lg bg-slate-950 border border-slate-800 hover:border-slate-600 transition-all text-left"
+                  className="flex flex-col items-start p-4 rounded-lg bg-muted/30 border border-border hover:border-muted-foreground transition-all text-left group"
                 >
-                  <FileJson className="w-5 h-5 text-slate-400 mb-3" />
-                  <span className="font-bold text-sm text-slate-300 mb-1">
+                  <FileJson className="w-5 h-5 text-muted-foreground mb-3 group-hover:text-foreground" />
+                  <span className="font-bold text-sm text-foreground mb-1">
                     Raw JSON
                   </span>
-                  <p className="text-[10px] text-slate-500">Q, A, Hints only.</p>
+                  <p className="text-[10px] text-muted-foreground">Q, A, Hints only.</p>
                 </button>
 
                 <button
                   onClick={() => handleDownload("csv")}
-                  className="flex flex-col items-start p-4 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-500/30 hover:bg-emerald-950/5 transition-all text-left"
+                  className="flex flex-col items-start p-4 rounded-lg bg-muted/30 border border-border hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-left"
                 >
-                  <FileSpreadsheet className="w-5 h-5 text-emerald-500/70 mb-3" />
-                  <span className="font-bold text-sm text-slate-300 mb-1">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-500 mb-3" />
+                  <span className="font-bold text-sm text-foreground mb-1">
                     CSV Export
                   </span>
-                  <p className="text-[10px] text-slate-500">Excel friendly.</p>
+                  <p className="text-[10px] text-muted-foreground">Excel friendly.</p>
                 </button>
               </div>
             </div>
           </div>
 
           {/* Import Card */}
-          <div className="flex flex-col h-full bg-slate-900/40 border border-slate-800 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
-            <div className="p-6 border-b border-white/5 bg-gradient-to-r from-slate-900 to-slate-900/50">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Upload className="w-5 h-5 text-cyan-400" /> Import Session
+          <div className="flex flex-col h-full bg-card border border-border rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
+            <div className="p-6 border-b border-border bg-muted/50">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <Upload className="w-5 h-5 text-cyan-600 dark:text-cyan-400" /> Import Session
               </h2>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-muted-foreground mt-1">
                 Replace current session with new data.
               </p>
               <div className="mt-3 flex items-center gap-2 text-xs">
                 <AlertTriangle className="w-4 h-4 text-amber-500" />
-                <span className="text-amber-400 font-medium">
+                <span className="text-amber-600 dark:text-amber-400 font-medium">
                   Importing will clear all existing session data
                 </span>
               </div>
@@ -329,10 +329,10 @@ export default function SaveLoadPage() {
                 className={`flex-1 min-h-[260px] rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center p-6 text-center cursor-pointer group relative overflow-hidden
                   ${
                     uploadStatus === "error"
-                      ? "border-red-500/30 bg-red-950/5"
+                      ? "border-red-500/30 bg-red-500/5"
                       : uploadStatus === "success"
-                      ? "border-emerald-500/30 bg-emerald-950/5"
-                      : "border-slate-700 hover:border-cyan-500/50 hover:bg-slate-950"
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : "border-border hover:border-cyan-500/50 hover:bg-accent"
                   }`}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -346,40 +346,42 @@ export default function SaveLoadPage() {
 
                 {isUploading ? (
                   <div className="animate-pulse space-y-3">
-                    <div className="p-4 bg-slate-800 rounded-full inline-block">
-                      <Upload className="w-8 h-8 text-slate-400" />
+                    <div className="p-4 bg-muted rounded-full inline-block">
+                      <Upload className="w-8 h-8 text-muted-foreground" />
                     </div>
-                    <div className="text-sm font-bold text-slate-300">
+                    <div className="text-sm font-bold text-foreground">
                       Processing file...
                     </div>
                   </div>
                 ) : uploadStatus === "success" ? (
                   <div className="animate-in zoom-in-95 duration-300 space-y-4 w-full">
                     <div className="p-3 bg-emerald-500/20 rounded-full inline-block ring-1 ring-emerald-500/40">
-                      <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                      <CheckCircle2 className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div>
-                      <div className="text-base font-bold text-white">
+                      <div className="text-base font-bold text-foreground">
                         Import Complete
                       </div>
-                      <div className="text-xs text-slate-400 mt-2 mb-3 max-w-sm mx-auto">
+                      <div className="text-xs text-muted-foreground mt-2 mb-3 max-w-sm mx-auto">
                         {statusMsg}
                       </div>
                       
                       {importResult && (
-                        <div className="mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-800 text-left">
-                          <div className="text-xs text-slate-400 space-y-1">
-                            {importResult.import.counts && (
+                        <div className="mt-3 p-3 rounded-lg bg-muted border border-border text-left">
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            {importResult.import.counts ? (
                               <div className="grid grid-cols-2 gap-2">
-                                <div>Questions: <span className="text-emerald-400 font-bold">{importResult.import.counts.questions}</span></div>
-                                <div>Hints: <span className="text-emerald-400 font-bold">{importResult.import.counts.hints}</span></div>
-                                {importResult.import.counts.metrics !== undefined && (
-                                  <div>Metrics: <span className="text-emerald-400 font-bold">{importResult.import.counts.metrics}</span></div>
+                                <div>Questions: <span className="text-emerald-600 dark:text-emerald-400 font-bold">{importResult.import.counts.q ?? 0}</span></div>
+                                <div>Hints: <span className="text-emerald-600 dark:text-emerald-400 font-bold">{importResult.import.counts.h ?? 0}</span></div>
+                                {importResult.import.counts.m !== undefined && (
+                                  <div>Metrics: <span className="text-emerald-600 dark:text-emerald-400 font-bold">{importResult.import.counts.m}</span></div>
                                 )}
-                                {importResult.import.counts.candidates !== undefined && (
-                                  <div>Candidates: <span className="text-emerald-400 font-bold">{importResult.import.counts.candidates}</span></div>
+                                {importResult.import.counts.c !== undefined && (
+                                  <div>Candidates: <span className="text-emerald-600 dark:text-emerald-400 font-bold">{importResult.import.counts.c}</span></div>
                                 )}
                               </div>
+                            ) : (
+                              <div className="italic opacity-80">Check generator for new content.</div>
                             )}
                           </div>
                         </div>
@@ -399,30 +401,30 @@ export default function SaveLoadPage() {
                 ) : uploadStatus === "error" ? (
                   <div className="animate-in shake space-y-3">
                     <div className="p-3 bg-red-500/20 rounded-full inline-block ring-1 ring-red-500/40">
-                      <AlertCircle className="w-10 h-10 text-red-400" />
+                      <AlertCircle className="w-10 h-10 text-red-500" />
                     </div>
                     <div>
-                      <div className="text-base font-bold text-white">
+                      <div className="text-base font-bold text-foreground">
                         Import Failed
                       </div>
-                      <div className="text-xs text-red-300 mt-1 max-w-[280px] mx-auto">
+                      <div className="text-xs text-red-500 mt-1 max-w-[280px] mx-auto">
                         {statusMsg}
                       </div>
                     </div>
-                    <div className="text-[10px] text-slate-500 uppercase font-bold pt-2">
+                    <div className="text-[10px] text-muted-foreground uppercase font-bold pt-2">
                       Click to try again
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-3 group-hover:scale-105 transition-transform duration-300">
-                    <div className="p-4 bg-slate-900 rounded-full inline-block shadow-lg group-hover:shadow-cyan-900/20">
-                      <Upload className="w-8 h-8 text-slate-400 group-hover:text-cyan-400 transition-colors" />
+                    <div className="p-4 bg-muted rounded-full inline-block shadow-lg group-hover:shadow-cyan-500/20">
+                      <Upload className="w-8 h-8 text-muted-foreground group-hover:text-cyan-500 transition-colors" />
                     </div>
                     <div>
-                      <div className="text-sm font-bold text-white">
+                      <div className="text-sm font-bold text-foreground">
                         Click to upload file
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">
+                      <div className="text-xs text-muted-foreground mt-1">
                         Supports .json or .csv
                       </div>
                     </div>
@@ -434,28 +436,28 @@ export default function SaveLoadPage() {
         </div>
 
         {/* Documentation Section */}
-        <div className="border-t border-slate-800 pt-10">
+        <div className="border-t border-border pt-10">
           <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-slate-800 rounded-lg">
-              <Code2 className="w-5 h-5 text-indigo-400" />
+            <div className="p-2 bg-muted rounded-lg">
+              <Code2 className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">
+              <h3 className="text-lg font-bold text-foreground">
                 Format Specification
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Schema reference for imported files.
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            {/* Nav */}
+            {/* Navigation Tabs */}
             <div className="space-y-2">
               {[
                 {
                   id: "full",
-                  label: "Full Backup (JSON)",
+                  label: "Advanced Import (JSON)",
                   icon: <Server className="w-4 h-4" />,
                 },
                 {
@@ -474,8 +476,8 @@ export default function SaveLoadPage() {
                   onClick={() => setActiveGuideTab(tab.id as any)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
                     activeGuideTab === tab.id
-                      ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                      : "text-slate-400 hover:text-white hover:bg-slate-900"
+                      ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
                   }`}
                 >
                   {tab.icon} {tab.label}
@@ -483,83 +485,111 @@ export default function SaveLoadPage() {
               ))}
             </div>
 
-            {/* Content */}
+            {/* Tab Content */}
             <div className="lg:col-span-3">
+              
+              {/* --- Full / Advanced Import Tab --- */}
               {activeGuideTab === "full" && (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-3">
                   <div className="flex items-center gap-3 mb-2">
-                    <Badge color="purple">Complete System State</Badge>
-                    <span className="text-xs text-slate-400">
-                      Use for full restoration with all metadata (Hinteval format).
+                    <Badge color="purple">Advanced Import</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Full system state with strict metric & candidate requirements.
                     </span>
                   </div>
                   <CodeWindow
-                    filename="full_backup.json"
+                    filename="strict_backup.json"
                     code={`{
-  "name": "session_export_abc123",
   "subsets": {
     "export": {
       "instances": {
-        "42": {
-          "question": { 
-            "question": "What is the capital of Brazil?" 
-          },
-          "answers": [{ 
-            "answer": "Brasília" 
-          }],
+        "q_101": {
+          "question": { "question": "What is the primary function of the mitochondria?" },
+          "answers": [{ "answer": "Cellular respiration" }],
           "hints": [
-            { 
-              "hint": "It was founded in 1960.",
-              "db_id": 101,
+            {
+              "hint": "It is found in animal cells but not typically in chloroplasts.",
               "metrics": [
-                { 
-                  "name": "relevance", 
-                  "value": 0.95,
-                  "metadata": {"source": "auto"}
+                { "name": "relevance", "value": 0.4 },
+                { "name": "readability", "value": 1.0 },
+                { "name": "answer-leakage", "value": 0.0 },
+                { "name": "familiarity", "value": 0.9 },
+                { "name": "convergence", "value": 0.33, 
+                  "metadata": {
+                    "scores": { "Cellular respiration": 1, "Photosynthesis": 0, "Protein synthesis": 1 }
+                  } 
                 }
               ],
-              "entities": [
-                {
-                  "text": "1960",
-                  "type": "DATE",
-                  "start": 19,
-                  "end": 23
+              "entities": [{ "text": "chloroplasts", "type": "BIO", "start": 35, "end": 47 }]
+            },
+            {
+              "hint": "It generates energy-rich molecules called ATP.",
+              "metrics": [
+                { "name": "relevance", "value": 0.9 },
+                { "name": "readability", "value": 0.8 },
+                { "name": "answer-leakage", "value": 0.2 },
+                { "name": "familiarity", "value": 0.6 },
+                { "name": "convergence", "value": 0.66,
+                  "metadata": {
+                    "scores": { "Cellular respiration": 1, "Photosynthesis": 0, "Protein synthesis": 0 }
+                  } 
                 }
-              ]
+              ],
+              "entities": [{ "text": "ATP", "type": "CHEM", "start": 38, "end": 41 }]
+            },
+            {
+              "hint": "It is often referred to as the powerhouse of the cell.",
+              "metrics": [
+                { "name": "relevance", "value": 0.95 },
+                { "name": "readability", "value": 1.0 },
+                { "name": "answer-leakage", "value": 0.1 },
+                { "name": "familiarity", "value": 1.0 },
+                { "name": "convergence", "value": 1.0,
+                  "metadata": {
+                    "scores": { "Cellular respiration": 1, "Photosynthesis": 0, "Protein synthesis": 0 }
+                  }
+                }
+              ],
+              "entities": []
             }
           ],
           "candidates_full": [
-            { 
-              "text": "Rio de Janeiro", 
-              "is_eliminated": true,
-              "created_at": "2025-01-06T10:00:00"
-            },
-            { 
-              "text": "Brasília", 
-              "is_eliminated": false,
-              "created_at": "2025-01-06T10:01:00"
-            }
-          ],
-          "candidates": ["Rio de Janeiro", "Brasília"]
+            { "text": "Cellular respiration", "is_groundtruth": true, "is_eliminated": false },
+            { "text": "Photosynthesis", "is_groundtruth": false, "is_eliminated": true },
+            { "text": "Protein synthesis", "is_groundtruth": false, "is_eliminated": true }
+          ]
         }
       }
     }
   }
 }`}
                   />
+                  <div className="mt-4 p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Info className="w-4 h-4 text-indigo-500" />
+                        <h4 className="text-sm font-bold text-foreground">Strict Validation Rules</h4>
+                    </div>
+                    <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
+                      <li><strong>Structure:</strong> Must use <code>subsets.export.instances</code> nesting.</li>
+                      <li><strong>Metrics:</strong> Each hint requires exactly 5 metrics: <em>relevance, readability, answer-leakage, familiarity, convergence</em>.</li>
+                      <li><strong>Convergence:</strong> The <code>convergence</code> metric must include a <code>metadata.scores</code> object mapping each candidate to 0 (eliminated) or 1 (kept).</li>
+                      <li><strong>Candidates:</strong> Minimum 2 candidates. Exactly one must have <code>"is_groundtruth": true</code>.</li>
+                    </ul>
+                  </div>
                 </div>
               )}
 
+              {/* --- Simple Import Tab --- */}
               {activeGuideTab === "simple" && (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-3">
                   <div className="flex items-center gap-3 mb-2">
                     <Badge color="slate">Minimal Format</Badge>
-                    <span className="text-xs text-slate-400">
-                      Basic structure for importing new questions without metadata.
+                    <span className="text-xs text-muted-foreground">
+                      Flat structure for quick question loading.
                     </span>
                   </div>
                   <CodeWindow
-                    filename="import_data.json"
+                    filename="simple.json"
                     code={`{
   "question": "What is the capital of Brazil?",
   "answer": "Brasília",
@@ -570,20 +600,21 @@ export default function SaveLoadPage() {
   ]
 }`}
                   />
-                  <div className="mt-4 p-3 rounded-lg bg-slate-900/50 border border-slate-800">
-                    <p className="text-xs text-slate-400">
-                      <strong className="text-slate-300">Note:</strong> Hints can be either an array of strings or objects with "hint" property. If answer is missing, it will be auto-generated.
+                  <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
+                    <p className="text-xs text-muted-foreground">
+                      <strong className="text-foreground">Note:</strong> Hints can be strings or objects. If the <code>answer</code> field is missing, the AI will auto-generate one upon import.
                     </p>
                   </div>
                 </div>
               )}
 
+              {/* --- CSV Import Tab --- */}
               {activeGuideTab === "csv" && (
                 <div className="animate-in fade-in slide-in-from-left-2 duration-300 space-y-3">
                   <div className="flex items-center gap-3 mb-2">
                     <Badge color="emerald">Spreadsheet Format</Badge>
-                    <span className="text-xs text-slate-400">
-                      Two-column format: type and content (headers are case-insensitive).
+                    <span className="text-xs text-muted-foreground">
+                      Simple two-column format (Type, Content).
                     </span>
                   </div>
                   <CodeWindow
@@ -595,10 +626,10 @@ hint,It was founded in 1960.
 hint,Designed by Oscar Niemeyer.
 hint,Located in the central highlands.`}
                   />
-                  <div className="mt-4 p-3 rounded-lg bg-slate-900/50 border border-slate-800">
-                    <p className="text-xs text-slate-400 space-y-1">
-                      <strong className="text-slate-300">Valid types:</strong> question, answer, hint<br/>
-                      <strong className="text-slate-300">Requirements:</strong> Exactly one question required. Answer is optional (will be generated if missing).
+                  <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
+                    <p className="text-xs text-muted-foreground space-y-1">
+                      <strong className="text-foreground">Valid types:</strong> question, answer, hint<br/>
+                      <strong className="text-foreground">Rules:</strong> A file must contain exactly one question row. Hint rows are optional.
                     </p>
                   </div>
                 </div>

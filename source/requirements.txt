@@ -14,5 +14,8 @@ psycopg2-binary
 pandas
 requests
 
+#Scheduler
+apscheduler
+
 #Framework
 hinteval

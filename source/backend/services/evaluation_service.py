@@ -37,10 +37,10 @@ contextual_evaluator = ContextualEmbeddings(sbert_model='all-mpnet-base-v2', ena
 # Convergence Evaluator
 llm_evaluator = LlmBased(model_name="llama-3-70b", together_ai_api_key=TOGETHER_API_KEY)
 
-# Relevance Evaluators
+# Familiarty Evaluator
 wikipedia_evaluator = Wikipedia()
 
-# Relevance Evaluators
+# Relevance Evaluator
 rougeL_evaluator = Rouge("rougeL")
 
 # Readability Evaluator
@@ -131,12 +131,38 @@ def run_evaluation_and_persist(
         cur.execute(f"DELETE FROM metrics WHERE hint_id IN ({placeholders})", tuple(hint_ids))
         cur.execute(f"DELETE FROM entities WHERE hint_id IN ({placeholders})", tuple(hint_ids))
 
+  
+    candidate_elimination_map = {c["text"]: 0 for c in sorted_candidate_objs}
+    
+    for res in results:
+        res_metrics = res.get("metrics", [])
+        # Look for the convergence metric
+        conv_metric = next((m for m in res_metrics if m.get("name") == "convergence"), None)
+        if conv_metric:
+            # Metadata contains the per-candidate scores: {'Candidate Text': 1.0, ...}
+            scores = conv_metric.get("metadata", {}).get("scores", {})
+            for cand_text, score in scores.items():
+                # In HintEval, score 0 means incompatible/eliminated
+                if score == 0:
+                    candidate_elimination_map[cand_text] = 1
+
+    # --- PERSIST CANDIDATES ---
     if candidates_were_generated:
         cur.execute("DELETE FROM candidate_answers WHERE question_id = %s", (qid,))
         for c_obj in sorted_candidate_objs:
+            # Retrieve calculated status (default to 0 if not found)
+            is_elim = candidate_elimination_map.get(c_obj["text"], 0)
             cur.execute(
-                "INSERT INTO candidate_answers (question_id, candidate_text, is_eliminated, created_at, is_groundtruth) VALUES (%s, %s, 0, %s, %s)",
-                (qid, c_obj["text"], _now(), c_obj["is_groundtruth"])
+                "INSERT INTO candidate_answers (question_id, candidate_text, is_eliminated, created_at, is_groundtruth) VALUES (%s, %s, %s, %s, %s)",
+                (qid, c_obj["text"], is_elim, _now(), c_obj["is_groundtruth"])
+            )
+    else:
+        # If candidates existed, we still need to UPDATE their elimination status based on this new evaluation
+        for c_obj in sorted_candidate_objs:
+            is_elim = candidate_elimination_map.get(c_obj["text"], 0)
+            cur.execute(
+                "UPDATE candidate_answers SET is_eliminated = %s WHERE question_id = %s AND candidate_text = %s",
+                (is_elim, qid, c_obj["text"])
             )
     
     conn.commit()
@@ -197,6 +223,7 @@ def run_evaluation_and_persist(
                 row.append(0.0)
         hint2hint_sim.append(row)
 
+    print("Evaluation and persistence complete.", flush=True)
     return {
         "question": question,
         "num_hints": len(hints),
@@ -224,8 +251,9 @@ def evaluate_hints(
         answers=[answer] if (answer and answer.strip()) else [],
         hints=[h.strip() for h in hints],
     )
-
+    print(f"Candidates list: {candidates}", flush=True)
     instance.question.metadata['candidate_answers-llama-3-70b'] = candidates
+
     instances = [instance]
     q_h_list = [instance.question] + instance.hints
     

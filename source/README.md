@@ -1,25 +1,25 @@
-# HintEval: A Framework for Hint Generation and Evaluation
+# 💡 HintEval: Generation & Evaluation Framework
 
-## Overview
+## 📖 Overview
 **HintEval** is a comprehensive framework designed for the generation and systematic evaluation of hints. The goal of this system is to provide a standardized environment where users can generate hints using various strategies (based on the HintEval-Dataset) and evaluate their effectiveness, quality, and pedagogical value.
 
-The framework consists of:
-* **Backend:** A FastAPI-powered Python service that handles hint generation logic, dataset processing, and evaluation metrics.
-* **Frontend:** A modern web interface for interactive hint generation and visualization.
+The framework consists of two core components:
+* 🐍 **Backend:** A **FastAPI**-powered Python service that handles hint generation logic, dataset processing, and evaluation metrics.
+* ⚛️ **Frontend:** A modern web interface (Node.js) for interactive hint generation and visualization.
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 Follow these steps to set up your local environment and run the entire framework.
 
 ### 1. Prerequisites
-Ensure you have the following installed:
-* **Python 3.8+**
-* **Node.js & npm** (The `main.py` script will trigger npm commands)
+Before proceeding, ensure you have the following installed on your machine:
+* **Python 3.11.9**
+* **Node.js & npm** (The `app.py` script will trigger necessary npm commands)
 
 ### 2. Set Up the Virtual Environment
-To keep the project dependencies isolated, create and activate a virtual environment.
+To keep project dependencies isolated, we recommend creating and activating a virtual environment.
 
 **Create the environment:**
 ```bash
@@ -28,7 +28,7 @@ python -m venv venv
 
 # macOS / Linux
 python3 -m venv venv
-
+```
 
 **Activate the environment:**
 ```bash
@@ -39,11 +39,35 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-### 3. Install dependencies
+### 3. Install Dependencies
+Once the environment is active, install the required Python packages:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Run the System
+### 4. Configure Environment Variables
+Create a file named `.env` inside the `/source` folder. You will need to populate it with your specific API keys and database credentials.
 
-Navigate to the app.py file and execute it.
+**Copy and paste the following into your `.env` file:**
+
+```env
+# AI Model Configuration
+TOGETHER_API_KEY="key_here"
+TOGETHER_BASE_URL="[https://api.together.xyz/v1](https://api.together.xyz/v1)"
+
+# Database Configuration
+DB_HOST="hostname"
+DB_NAME="name"
+DB_USER="user"
+DB_PASS="password"
+```
+
+> **Note:** Ensure `TOGETHER_API_KEY` contains your valid provider key and the `DB_*` variables match your PostgreSQL (or relevant DB) setup.
+
+### 5. Run the System
+Navigate to the directory containing `app.py` and execute the script. This will initialize both the backend and frontend services.
+
+```bash
+python app.py
+```

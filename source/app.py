@@ -5,29 +5,48 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import uvicorn
 
-# Import your modules
 from backend.database.database_init import init_db
-from backend.database.connection import init_pool, close_pool
+from backend.database.connection import init_pool, close_pool, get_db
 from backend.routers import hinteval, metrics, save_and_load
+from backend.database.reset_db import reset_db_logic
 
-# This points to: current_folder/source/frontend/hinteval-ui
 FRONTEND_DIR = os.path.join(os.getcwd(), "frontend", "hinteval-ui")
 
-# --- Dependency Injection Lifecycle ---
+def reset_db():
+    try:
+      
+        db_generator = get_db()
+        conn = next(db_generator) 
+        reset_db_logic(conn)
+        print("✅ Database reset successfully.", flush=True)
+        init_db()
+        
+    except StopIteration:
+        print("❌ Error: get_db() returned nothing (generator is empty).")
+    except Exception as e:
+        print(f"❌ Database reset failed: {e}")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB
     init_pool()
     init_db()
+    
+    scheduler = BackgroundScheduler()
+    trigger = CronTrigger(week='*/2', day_of_week='sun', hour=22, minute=0)
+    scheduler.add_job(reset_db, trigger)
+    scheduler.start()
+    
     yield
-    # Cleanup
+    
+    scheduler.shutdown()
     close_pool()
 
-# --- App Setup ---
-app = FastAPI(title="HintEval Agnostic API", version="3.0", lifespan=lifespan)
+app = FastAPI(title="Hint Generation and Evaluation", version="1.0", lifespan=lifespan)
 
-app.add_middleware(SessionMiddleware, secret_key="key12345")
+app.add_middleware(SessionMiddleware, secret_key="09d25ejklsj34094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,25 +60,13 @@ app.include_router(metrics.router)
 app.include_router(save_and_load.router)
 
 def run_frontend():
-    """
-    Runs 'npm run dev' in the frontend directory in a separate thread.
-    """
-    print(f"🚀 Starting Frontend in: {FRONTEND_DIR}", flush=True)
-    
     npm_cmd = "npm.cmd" if os.name == 'nt' else "npm"
-    
     try:
         subprocess.run([npm_cmd, "run", "dev"], cwd=FRONTEND_DIR, check=True)
-    except FileNotFoundError:
-        print("❌ Error: Node.js/npm not found. Please install Node.js.", flush=True)
-    except Exception as e:
-        print(f"❌ Error starting frontend: {e}", flush=True)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
-    import uvicorn
-
     frontend_thread = threading.Thread(target=run_frontend, daemon=True)
     frontend_thread.start()
-
-    print("🦄 Starting Backend on port 8001...", flush=True)
     uvicorn.run("app:app", host="0.0.0.0", port=8001, reload=True)
