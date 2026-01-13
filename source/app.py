@@ -62,7 +62,7 @@ app.include_router(save_and_load.router)
 def run_frontend():
     npm_cmd = "npm.cmd" if os.name == 'nt' else "npm"
     try:
-        subprocess.run([npm_cmd, "run", "dev"], cwd=FRONTEND_DIR, check=True)
+        subprocess.run([npm_cmd, "start"], cwd=FRONTEND_DIR, check=True)
     except Exception:
         pass
 
