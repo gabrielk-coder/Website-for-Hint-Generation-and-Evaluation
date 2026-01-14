@@ -32,7 +32,6 @@ def export_session(
                 headers={"Content-Disposition": "attachment; filename=hinteval_session.csv"}
             )
             
-        # JSON Export (Simple or Full)
         is_full = (format == "full_json")
         filename = "hinteval_backup_full.json" if is_full else "hinteval_session.json"
         
@@ -68,7 +67,6 @@ async def import_session(
         import_data = None
         format_type = "json"
 
-        # Validate and parse input before touching the DB
         if filename.endswith(".json"):
             try:
                 import_data = json.loads(content.decode('utf-8'))
@@ -83,7 +81,6 @@ async def import_session(
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type. Use .json or .csv")
 
-        # Clear existing data only if validation passed
         logger.info(f"Clearing session {session_id} for import.")
         clear_result = save_and_load_service.clear_session_data(conn, session_id)
         
@@ -104,7 +101,6 @@ async def import_session(
         }
 
     except ValueError as ve:
-        # Logic errors (e.g., missing fields)
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"Import error: {e}", exc_info=True)
