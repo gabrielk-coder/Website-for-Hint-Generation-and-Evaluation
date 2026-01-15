@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.env
+venv/
+.DS_Store
+node_modules/
+.vscode/
+.idea/
+.venv/
+source/.env
+source/venv/
+*.pdf
+*.log
+*.sqlite3
+*.db
+839 (2).pdf
+source/backend/data
+source/backend/notused/
+notused/
+source/backend/notused/*
+Files
