@@ -1,4 +1,4 @@
-# 💡 HintEval: Generation & Evaluation Framework
+# 💡A Website for Hint Generation and Evaluation
 
 ## 📖 Overview
 **HintEval** is a comprehensive framework designed for the generation and systematic evaluation of hints. The goal of this system is to provide a standardized environment where users can generate hints using various strategies (based on the HintEval-Dataset) and evaluate their effectiveness, quality, and pedagogical value.
@@ -23,20 +23,17 @@ To keep project dependencies isolated, we recommend creating and activating a vi
 
 **Create the environment:**
 ```bash
-# Windows
-python -m venv venv
 
-# macOS / Linux
-python3 -m venv venv
-```
+1. First install miniconda or anaconda and activate it.
+2. conda create -n hinteval_env python=3.11.9 --no-default-packages
+
+
 
 **Activate the environment:**
 ```bash
-# Windows
-.\venv\Scripts\activate
 
-# macOS / Linux
-source venv/bin/activate
+conda activate hinteval_env
+
 ```
 
 ### 3. Install Dependencies
@@ -65,9 +62,11 @@ DB_PASS="your_password"
 
 > **Note:** Ensure `TOGETHER_API_KEY` contains your valid provider key and the `DB_*` variables match your PostgreSQL (or relevant DB) setup.
 
-### 5. Run the System
-Navigate to the directory containing `app.py` and execute the script. This will initialize both the backend and frontend services.
+### 5. Create another frontend Environement Variable
+Create a file named .env.local inside the folder /source/frontend/hinteval-ui.
 
-```bash
-python app.py
-```
+**Copy and paste the following into your `.env.local` file:**
+NEXT_PUBLIC_HINTEVAL_API=address_name_of_API
+
+### 5. Run the System
+Navigate to the directory containing `app.py` and execute the script. This will run the backend. For the frontend navigate to the hinteval-ui directory and run `npm run start` for the frontend.
